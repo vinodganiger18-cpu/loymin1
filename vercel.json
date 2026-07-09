@@ -28,6 +28,6 @@
     }
   ],
   "crons": [
-    { "path": "/api/payments/expire", "schedule": "*/5 * * * *" }
+    { "path": "/api/payments/expire", "schedule": "0 0 * * *" }
   ]
 }
