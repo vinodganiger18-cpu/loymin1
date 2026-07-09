@@ -1,0 +1,7 @@
+{
+  "name": "perkpay",
+  "private": true,
+  "scripts": {
+    "build": "cd perkpay-frontend && npm install && npm run build"
+  }
+}
