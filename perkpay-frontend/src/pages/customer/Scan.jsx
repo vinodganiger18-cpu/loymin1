@@ -6,70 +6,26 @@ import BottomNav from '../../components/BottomNav';
 import TopBar from '../../components/TopBar';
 
 const SCANNER_ID = 'qr-scanner-region';
-const PENDING_KEY = 'perkpay_pending_order';
 
-// Extracts our order ref from a standard UPI deep link, e.g.
-// upi://pay?pa=shop@bank&pn=Shop&am=500.00&cu=INR&tr=ORD123abc&tn=...
+// Extracts our order ref from the PerkPay QR, e.g. perkpay://pay?order=ORD123
 function extractOrderId(decodedText) {
   try {
-    const url = new URL(decodedText.replace('upi://', 'https://dummy/'));
-    return url.searchParams.get('tr');
+    const url = new URL(decodedText.replace('perkpay://', 'https://dummy/'));
+    return url.searchParams.get('order');
   } catch {
     return null;
   }
 }
 
-function savePending(data) {
-  localStorage.setItem(PENDING_KEY, JSON.stringify(data));
-}
-function loadPending() {
-  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
-}
-function clearPending() {
-  localStorage.removeItem(PENDING_KEY);
-}
-
 export default function Scan() {
   const { user, refreshUser } = useAuth();
-  // scanning | review | opening | confirming | done | error | restoring
-  const [phase, setPhase] = useState('restoring');
+  // scanning | review | paying | confirming | done | error
+  const [phase, setPhase] = useState('scanning');
   const [order, setOrder] = useState(null);
   const [applyRewards, setApplyRewards] = useState(false);
-  const [upiLink, setUpiLink] = useState(null);
-  const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const scannerRef = useRef(null);
-
-  // On mount: if we navigated away to a UPI app and the browser reloaded
-  // this page on return, restore the "confirm payment" screen instead of
-  // silently dropping back to the scanner (this was the bug where the
-  // shopkeeper's screen never flipped to green — the customer never got
-  // back to the confirm button because their state was lost).
-  useEffect(() => {
-    const pending = loadPending();
-    if (!pending) { setPhase('scanning'); return; }
-
-    api.paymentStatus(pending.orderId).then((status) => {
-      if (['success', 'partial_paid', 'reward_paid'].includes(status.status)) {
-        clearPending();
-        setResult({
-          earnedPoints: status.earnedPoints,
-          shopBalance: status.shopBalance,
-          shopName: status.shopName || pending.shopName,
-        });
-        setPhase('done');
-      } else if (status.status === 'pending') {
-        setUpiLink(pending.upiLink);
-        setRemaining(pending.remaining);
-        setOrder({ orderId: pending.orderId, shopName: pending.shopName });
-        setPhase('opening');
-      } else {
-        clearPending();
-        setPhase('scanning');
-      }
-    }).catch(() => { clearPending(); setPhase('scanning'); });
-  }, []);
 
   useEffect(() => {
     if (phase !== 'scanning') return;
@@ -92,7 +48,7 @@ export default function Scan() {
   async function handleScanned(decodedText) {
     const orderId = extractOrderId(decodedText);
     if (!orderId) {
-      setError('This QR code doesn\u2019t look like a PerkPay bill. Ask the shopkeeper to generate a new one.');
+      setError('This QR code doesn’t look like a PerkPay bill. Ask the shopkeeper to generate a new one.');
       setPhase('error');
       return;
     }
@@ -106,53 +62,83 @@ export default function Scan() {
     }
   }
 
+  // Poll the server (webhook-driven) until the transaction is settled.
+  async function waitForSettlement(orderId, shopNameFallback) {
+    setPhase('confirming');
+    const deadline = Date.now() + 90_000; // give up after 90s
+    while (Date.now() < deadline) {
+      try {
+        const status = await api.paymentStatus(orderId);
+        if (['success', 'partial_paid', 'reward_paid'].includes(status.status)) {
+          await refreshUser();
+          setResult({
+            earnedPoints: status.earnedPoints,
+            shopBalance: status.shopBalance,
+            shopName: status.shopName || shopNameFallback,
+          });
+          setPhase('done');
+          return;
+        }
+        if (status.status === 'failed' || status.status === 'expired') {
+          setError('Payment failed or the bill expired.');
+          setPhase('review');
+          return;
+        }
+      } catch { /* transient — keep polling */ }
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+    // Still not settled — payment may still confirm; tell the user gently.
+    setError('We haven’t received confirmation yet. If money was deducted, your points will appear shortly.');
+    setPhase('review');
+  }
+
   async function handleContinue() {
     setError('');
     try {
       const data = await api.lockAmount(order.orderId, applyRewards);
 
-      // Fully paid with reward points — no UPI app needed at all.
-      if (data.success) {
+      // Fully covered by reward points — server already settled it.
+      if (data.fullyPaidByRewards) {
         await refreshUser();
         setResult(data);
         setPhase('done');
         return;
       }
 
-      setUpiLink(data.upiLink);
-      setRemaining(data.remaining);
-      setPhase('opening');
-      // Persist BEFORE navigating away — many mobile browsers reload or
-      // unload the page when handing off to a upi:// custom scheme, which
-      // would otherwise wipe this in-memory state.
-      savePending({ orderId: order.orderId, shopName: order.shopName, upiLink: data.upiLink, remaining: data.remaining });
-      window.location.href = data.upiLink;
+      // Open Razorpay Checkout for the remaining amount.
+      if (!window.Razorpay) {
+        setError('Payment SDK failed to load. Check your connection and try again.');
+        return;
+      }
+      setPhase('paying');
+      const rzp = new window.Razorpay({
+        key: data.razorpayKeyId,
+        order_id: data.razorpayOrderId,
+        amount: data.amountPaise,
+        currency: 'INR',
+        name: data.shopName,
+        description: `Bill at ${data.shopName}`,
+        prefill: { name: user?.name, email: user?.email },
+        theme: { color: '#7c3aed' },
+        handler() {
+          // Payment submitted — settlement is confirmed server-side via webhook.
+          waitForSettlement(order.orderId, data.shopName);
+        },
+        modal: {
+          ondismiss() {
+            setPhase('review');
+            setError('Payment cancelled.');
+          },
+        },
+      });
+      rzp.on('payment.failed', () => {
+        setPhase('review');
+        setError('Payment failed. Please try again.');
+      });
+      rzp.open();
     } catch (err) {
       setError(err.message);
     }
-  }
-
-  async function handleConfirm() {
-    setPhase('confirming');
-    setError('');
-    try {
-      const data = await api.confirmPayment(order.orderId);
-      clearPending();
-      await refreshUser();
-      setResult(data);
-      setPhase('done');
-    } catch (err) {
-      setError(err.message);
-      setPhase('opening');
-    }
-  }
-
-  if (phase === 'restoring') {
-    return (
-      <div className="page-container" style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 36, height: 36, border: '3px solid var(--brand-light)', borderTopColor: 'var(--brand)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-      </div>
-    );
   }
 
   if (phase === 'scanning') {
@@ -214,28 +200,15 @@ export default function Scan() {
     );
   }
 
-  if (phase === 'opening' || phase === 'confirming') {
+  if (phase === 'paying' || phase === 'confirming') {
     return (
       <div className="page-container">
         <TopBar title="Complete payment" />
-        <div className="scroll-area" style={{ textAlign: 'center', paddingTop: 40 }}>
-          <div className="card" style={{ padding: 20 }}>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Pay via UPI app</p>
-            <h1 style={{ fontSize: 32, marginTop: 6 }}>₹{remaining}</h1>
-            <p style={{ fontSize: 13, color: 'var(--text-faint)', marginTop: 4 }}>to {order.shopName}</p>
-          </div>
-
-          <a href={upiLink} className="btn btn-secondary btn-block" style={{ marginTop: 16 }}>
-            Open UPI app again
-          </a>
-
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 20 }}>
-            Once your UPI app confirms the payment, come back here and tap below.
+        <div className="scroll-area" style={{ textAlign: 'center', paddingTop: 60 }}>
+          <div style={{ width: 48, height: 48, margin: '0 auto', border: '3px solid var(--brand-light)', borderTopColor: 'var(--brand)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <p style={{ color: 'var(--text-muted)', marginTop: 20 }}>
+            {phase === 'confirming' ? 'Confirming your payment…' : 'Waiting for you to complete payment…'}
           </p>
-          {error && <p className="error-text">{error}</p>}
-          <button className="btn btn-primary btn-block" style={{ marginTop: 12 }} disabled={phase === 'confirming'} onClick={handleConfirm}>
-            {phase === 'confirming' ? 'Confirming…' : "I've completed the payment"}
-          </button>
         </div>
         <BottomNav />
       </div>
@@ -270,13 +243,13 @@ export default function Scan() {
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
           <Row label="Bill amount" value={`₹${order.amount}`} />
           {applyRewards && <Row label="Reward discount" value={`− ₹${order.maxDiscount}`} highlight />}
-          <Row label="Amount to pay via UPI" value={`₹${previewRemaining}`} bold />
+          <Row label="Amount to pay" value={`₹${previewRemaining}`} bold />
         </div>
 
         {error && <p className="error-text">{error}</p>}
 
         <button className="btn btn-primary btn-block" style={{ marginTop: 20 }} onClick={handleContinue}>
-          {previewRemaining === 0 ? 'Pay with points' : `Continue to pay ₹${previewRemaining}`}
+          {previewRemaining === 0 ? 'Pay with points' : `Pay ₹${previewRemaining}`}
         </button>
       </div>
       <BottomNav />

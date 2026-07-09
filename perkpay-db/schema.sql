@@ -7,8 +7,8 @@
 --
 -- Roles: customer | shopkeeper | admin
 --   - Customers: self sign-up.
---   - Shopkeepers: account created by admin OR self sign-up for login,
---     but they can NEVER create their own shop row — only admin can.
+--   - Shopkeepers: account created by admin ONLY (never self sign-up), and
+--     they can NEVER create their own shop row — only admin can.
 --   - Admin: manually seeded (see bottom), the only role that can
 --     insert/update/delete rows in `shops` and assign a shopkeeper
 --     (owner_id) to a shop.

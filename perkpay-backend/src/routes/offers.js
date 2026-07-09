@@ -1,6 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../lib/supabase');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { validateBody, schemas } = require('../lib/validate');
 
 const router = express.Router();
 
@@ -27,12 +28,9 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/offers — shopkeeper only, must own the shop
-router.post('/', requireAuth, requireRole('shopkeeper'), async (req, res) => {
+router.post('/', requireAuth, requireRole('shopkeeper'), validateBody(schemas.createOffer), async (req, res) => {
   const { shop_id, title, description, points_required, reward_type, reward_value, is_highlighted, valid_until } = req.body;
 
-  if (!shop_id || !title || !points_required || !reward_type) {
-    return res.status(400).json({ error: 'shop_id, title, points_required, reward_type are required' });
-  }
   if (!(await ownsShop(req.user.sub, shop_id))) {
     return res.status(403).json({ error: 'You do not own this shop' });
   }
@@ -50,7 +48,7 @@ router.post('/', requireAuth, requireRole('shopkeeper'), async (req, res) => {
 });
 
 // PATCH /api/offers/:id — shopkeeper only, must own the shop (e.g. toggle highlight)
-router.patch('/:id', requireAuth, requireRole('shopkeeper'), async (req, res) => {
+router.patch('/:id', requireAuth, requireRole('shopkeeper'), validateBody(schemas.updateOffer), async (req, res) => {
   const { data: offer } = await supabaseAdmin.from('offers').select('shop_id').eq('id', req.params.id).single();
   if (!offer || !(await ownsShop(req.user.sub, offer.shop_id))) {
     return res.status(403).json({ error: 'You do not own this offer' });

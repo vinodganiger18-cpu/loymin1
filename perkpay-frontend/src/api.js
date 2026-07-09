@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000';
+const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 function getToken() {
   return localStorage.getItem('perkpay_token');
@@ -50,11 +50,10 @@ export const api = {
   deleteOffer: (id) => request(`/api/offers/${id}`, { method: 'DELETE' }),
   saveOffer: (id) => request(`/api/offers/${id}/save`, { method: 'POST' }),
 
-  // payments
+  // payments (Razorpay-verified — settlement happens server-side via webhook)
   generateQr: (amount) => request('/api/payments/generate-qr', { method: 'POST', body: { amount } }),
   initiateOrder: (orderId) => request(`/api/payments/initiate/${orderId}`),
   lockAmount: (orderId, applyRewards) => request('/api/payments/lock-amount', { method: 'POST', body: { orderId, applyRewards } }),
-  confirmPayment: (orderId) => request('/api/payments/confirm', { method: 'POST', body: { orderId } }),
   paymentStatus: (orderId) => request(`/api/payments/status/${orderId}`),
 
   // user

@@ -2,6 +2,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { supabaseAdmin } = require('../lib/supabase');
+const { validateBody, schemas } = require('../lib/validate');
+const { env } = require('../lib/env');
 
 const router = express.Router();
 
@@ -15,7 +17,7 @@ function signToken(user) {
   return jwt.sign(
     { sub: user.id, role: user.role, name: user.name, email: user.email },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '7d', issuer: env.jwtIssuer, audience: env.jwtAudience }
   );
 }
 
@@ -27,16 +29,9 @@ function publicUser(u) {
 // POST /auth/signup  { name, email, password, referralCode? }
 // Customer self-signup ONLY. Shopkeeper accounts are created exclusively
 // by an admin via POST /api/admin/shopkeepers.
-router.post('/signup', async (req, res) => {
+router.post('/signup', validateBody(schemas.signup), async (req, res) => {
   const { name, email, password, referralCode } = req.body;
   const role = 'customer';
-
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'name, email and password are required' });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  }
 
   const { data: existing } = await supabaseAdmin
     .from('users').select('id').eq('email', email).maybeSingle();
@@ -58,25 +53,21 @@ router.post('/signup', async (req, res) => {
       name, email, password_hash, role,
       referral_code,
       referred_by: referredBy,
-      points_balance: referredBy ? 50 : 0,
     })
     .select()
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // referral bonus: 50 points each, logged in points_log
+  // Referral bonus: +50 lifetime points to both users, atomically (see
+  // apply_referral_bonus in production_functions.sql).
   if (referredBy) {
-    await supabaseAdmin.from('points_log').insert([
-      { user_id: newUser.id, points_change: 50, reason: 'referral_bonus' },
-    ]);
-    const { data: referrer } = await supabaseAdmin
-      .from('users').select('points_balance').eq('id', referredBy).single();
-    await supabaseAdmin
-      .from('users').update({ points_balance: referrer.points_balance + 50 }).eq('id', referredBy);
-    await supabaseAdmin.from('points_log').insert([
-      { user_id: referredBy, points_change: 50, reason: 'referral_bonus' },
-    ]);
+    const { error: refErr } = await supabaseAdmin.rpc('apply_referral_bonus', {
+      in_new_user_id: newUser.id,
+      in_referrer_id: referredBy,
+    });
+    if (refErr) console.error('[signup] referral bonus failed:', refErr);
+    newUser.points_balance = (newUser.points_balance || 0) + 50;
   }
 
   const token = signToken(newUser);
@@ -84,9 +75,8 @@ router.post('/signup', async (req, res) => {
 });
 
 // POST /auth/login  { email, password }
-router.post('/login', async (req, res) => {
+router.post('/login', validateBody(schemas.login), async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
 
   const { data: user } = await supabaseAdmin
     .from('users').select('*').eq('email', email).maybeSingle();

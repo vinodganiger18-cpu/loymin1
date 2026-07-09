@@ -87,7 +87,7 @@ export default function ShopkeeperHome() {
               Waiting for customer to scan & pay…
             </p>
             <p style={{ color: 'var(--text-faint)', fontSize: 12, marginTop: 4 }}>
-              QR expires in 2 minutes · Order {qr.orderId}
+              QR expires in 10 minutes · Order {qr.orderId}
             </p>
             <div className="spinner" style={spinnerStyle} />
             <button className="btn btn-ghost" style={{ marginTop: 20 }} onClick={reset}>Cancel & start over</button>

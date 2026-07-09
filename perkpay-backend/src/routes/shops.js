@@ -1,6 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../lib/supabase');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { validateBody, schemas } = require('../lib/validate');
 
 const router = express.Router();
 
@@ -37,15 +38,8 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // POST /api/shops  — ADMIN ONLY (shopkeepers cannot self-register a shop)
-router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
+router.post('/', requireAuth, requireRole('admin'), validateBody(schemas.createShop), async (req, res) => {
   const { name, address, lat, lng, category, earn_points_per_100, redeem_points_per_rupee, owner_id, upi_id } = req.body;
-
-  if (!name || !address || lat === undefined || lng === undefined || !earn_points_per_100 || !redeem_points_per_rupee) {
-    return res.status(400).json({ error: 'name, address, lat, lng, earn_points_per_100, redeem_points_per_rupee are required' });
-  }
-  if (!upi_id || !/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/.test(upi_id)) {
-    return res.status(400).json({ error: 'A valid UPI ID (e.g. shopname@okhdfcbank) is required to receive payments' });
-  }
 
   const { data, error } = await supabaseAdmin.rpc('create_shop', {
     in_name: name,
@@ -65,7 +59,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
 });
 
 // PATCH /api/shops/:id — ADMIN ONLY
-router.patch('/:id', requireAuth, requireRole('admin'), async (req, res) => {
+router.patch('/:id', requireAuth, requireRole('admin'), validateBody(schemas.updateShop), async (req, res) => {
   const allowed = ['name', 'address', 'category', 'earn_points_per_100', 'redeem_points_per_rupee', 'owner_id', 'is_active', 'upi_id'];
   const updates = {};
   for (const key of allowed) if (key in req.body) updates[key] = req.body[key];

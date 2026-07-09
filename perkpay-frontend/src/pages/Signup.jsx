@@ -44,7 +44,7 @@ export default function Signup() {
           value={form.email} onChange={(e) => update('email', e.target.value)} style={{ marginBottom: 16 }} />
 
         <label className="label">Password</label>
-        <input className="input" type="password" required minLength={6} placeholder="At least 6 characters"
+        <input className="input" type="password" required minLength={8} placeholder="At least 8 characters"
           value={form.password} onChange={(e) => update('password', e.target.value)} style={{ marginBottom: 16 }} />
 
         <label className="label">Referral code <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>(optional)</span></label>

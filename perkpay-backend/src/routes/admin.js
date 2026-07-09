@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { supabaseAdmin } = require('../lib/supabase');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { validateBody, schemas } = require('../lib/validate');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin'));
@@ -18,11 +19,8 @@ router.get('/shopkeepers', async (req, res) => {
 
 // POST /api/admin/shopkeepers — admin creates a shopkeeper login
 // body: { name, email, password }
-router.post('/shopkeepers', async (req, res) => {
+router.post('/shopkeepers', validateBody(schemas.createShopkeeper), async (req, res) => {
   const { name, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'name, email, password are required' });
-  }
   const { data: existing } = await supabaseAdmin.from('users').select('id').eq('email', email).maybeSingle();
   if (existing) return res.status(409).json({ error: 'Email already registered' });
 
