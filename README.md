@@ -1,5 +1,8 @@
 # PerkPay — Local Setup & Run Guide
 
+**Live Demo:** [https://loymin1-dusky.vercel.app/](https://loymin1-dusky.vercel.app/)
+**GitHub Repository:** [https://github.com/vinodganiger18-cpu/loymin1.git](https://github.com/vinodganiger18-cpu/loymin1.git)
+
 A loyalty-points web app: customers earn/redeem points via UPI (Razorpay) payments
 at local shops, shops are onboarded only by an admin, and shopkeepers post offers
 customers can browse and save.

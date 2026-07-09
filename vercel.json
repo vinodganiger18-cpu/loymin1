@@ -14,8 +14,12 @@
       "handle": "filesystem"
     },
     {
+      "src": "/(.*\\.[a-zA-Z0-9]+)$",
+      "dest": "/perkpay-frontend/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/perkpay-frontend/index.html"
     }
   ]
 }
